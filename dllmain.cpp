@@ -1,8 +1,12 @@
-﻿// dllmain.cpp : 定义 DLL 应用程序的入口点。
-#include "pch.h"
-#include <Shlwapi.h>
+﻿#include "pch.h"
+#include "httplib.h"
 
 #pragma comment(lib, "Shlwapi.lib")
+
+using namespace std;
+
+const string WINSCP_UPDATE_PAGE_DOMAIN = "https://winscp.net";
+const string WINSCP_UPDATE_PAGE_PATH = "/eng/downloads.php";
 
 HMODULE hRealVersionDll = NULL;
 
@@ -33,23 +37,23 @@ GetFileVersionInfoW_Type Real_GetFileVersionInfoW = NULL;
 VerQueryValueW_Type Real_VerQueryValueW = NULL;
 
 BOOL LoadRealVersionDll() {
-    WCHAR realDllPath[MAX_PATH];
+    CHAR realDllPath[MAX_PATH];
 
     // 获取 System32 目录路径
-    if (!GetSystemDirectoryW(realDllPath, MAX_PATH)) {
-        OutputDebugStringW(L"ProxyDLL: Failed to get system directory.\n");
+    if (!GetSystemDirectoryA(realDllPath, MAX_PATH)) {
+        OutputDebugStringA("Failed to get system directory.\n");
 
         return FALSE;
     }
 
     // 拼接真实 version.dll 的完整路径
-    PathCombineW(realDllPath, realDllPath, L"version.dll");
+    PathCombineA(realDllPath, realDllPath, "version.dll");
 
     // 加载真实的 version.dll
-    hRealVersionDll = LoadLibraryW(realDllPath);
+    hRealVersionDll = LoadLibraryA(realDllPath);
 
     if (!hRealVersionDll) {
-        OutputDebugStringW(L"ProxyDLL: Failed to load real version.dll.\n");
+        OutputDebugStringA("Failed to load real version.dll.\n");
 
         return FALSE;
     }
@@ -59,49 +63,116 @@ BOOL LoadRealVersionDll() {
     Real_GetFileVersionInfoW = GetFunctionT<GetFileVersionInfoW_Type>("GetFileVersionInfoW");
     Real_VerQueryValueW = GetFunctionT<VerQueryValueW_Type>("VerQueryValueW");
 
-    // 检查是否所有必要的函数都获取成功（根据实际需要添加检查）
+    // 检查是否所有必要的函数都获取成功
     if (!Real_GetFileVersionInfoSizeW || !Real_GetFileVersionInfoW || !Real_VerQueryValueW) {
-        OutputDebugStringW(L"ProxyDLL: Failed to get one or more function pointers from real version.dll.\n");
+        OutputDebugStringA("Failed to get function pointers from real version.dll.\n");
 
-        return FALSE; // 如果缺少关键函数则失败
+        return FALSE;
     }
-
-    OutputDebugStringW(L"ProxyDLL: Real version.dll loaded and function pointers obtained.\n");
 
     return TRUE;
 }
 
+string file_get_contents(string domain, string path) {
+    httplib::Client cli(domain);
+
+    auto res = cli.Get(path);
+
+    if (res && res->status == 200) {
+        return res->body;
+    }
+
+    return "";
+}
+
+string getVersionNum(const string html) {
+    if (html != "") {
+        regex hrefRegex("/eng/docs/history\\?a=([^\"']+)\">List of all changes</a>"); // 获取版本号
+
+        smatch match;
+
+        if (regex_search(html, match, hrefRegex)) {
+            return match[1];
+        }
+    }
+
+    return "";
+}
+
+void GetFileVersion(const wstring& filePath) {
+    DWORD dwHandle;
+    DWORD dwSize = GetFileVersionInfoSize(filePath.c_str(), &dwHandle);
+
+    if (dwSize == 0) {
+        std::wcout << L"Failed to get version info size for " << filePath << std::endl;
+        return;
+    }
+
+    BYTE* pVersionInfo = new BYTE[dwSize];
+
+    if (!GetFileVersionInfo(filePath.c_str(), dwHandle, dwSize, pVersionInfo)) {
+        std::wcout << L"Failed to get version info for " << filePath << std::endl;
+        delete[] pVersionInfo;
+        return;
+    }
+
+    VS_FIXEDFILEINFO* pFileInfo;
+    UINT uLen;
+
+    if (VerQueryValue(pVersionInfo, L"\\", (LPVOID*)&pFileInfo, &uLen)) {
+        std::wcout << L"File version: "
+            << (pFileInfo->dwFileVersionMS >> 16) << L"."
+            << (pFileInfo->dwFileVersionMS & 0xFFFF) << L"."
+            << (pFileInfo->dwFileVersionLS >> 16) << L"."
+            << (pFileInfo->dwFileVersionLS & 0xFFFF) << std::endl;
+    } else {
+        std::wcout << L"Failed to query version information." << std::endl;
+    }
+
+    delete[] pVersionInfo;
+}
+
 void TriggerUpdateCheck() {
-    MessageBoxW(0, L"测试消息", L"", 0);
+    string contents = file_get_contents(WINSCP_UPDATE_PAGE_DOMAIN, WINSCP_UPDATE_PAGE_PATH);
+
+    string ver = getVersionNum(contents);
+
+    if (ver != "") {
+        MessageBoxA(NULL, ver.c_str(), "", NULL);
+    }
+}
+
+DWORD WINAPI InitThread(LPVOID) {
+    TriggerUpdateCheck(); // 触发更新检查
+
+    return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
         case DLL_PROCESS_ATTACH:
-            OutputDebugStringW(L"ProxyDLL: DLL_PROCESS_ATTACH\n");
-
             // 禁止 DllMain 收到 DLL_THREAD_ATTACH 和 DLL_THREAD_DETACH 通知，可以轻微提高性能
             DisableThreadLibraryCalls(hModule);
 
             // 加载真实的 DLL 并获取函数指针
             if (!LoadRealVersionDll()) {
                 // 加载失败，可以选择是否让进程失败
-                MessageBoxW(NULL, L"Failed to load real version.dll. Application might not work correctly.",
-                            L"Proxy DLL Error", MB_OK | MB_ICONERROR);
+                MessageBoxA(NULL, "Failed to load real version.dll. Application might not work correctly.",
+                            "Error", MB_OK | MB_ICONERROR);
+
                 return FALSE; // 返回 FALSE 会导致加载 DLL 的进程失败
             }
 
-            TriggerUpdateCheck(); // 触发更新检查
-            break;
-        case DLL_THREAD_ATTACH:
-            // 通常不需要处理
-            break;
-        case DLL_THREAD_DETACH:
-            // 通常不需要处理
-            break;
-        case DLL_PROCESS_DETACH:
-            OutputDebugStringW(L"ProxyDLL: DLL_PROCESS_DETACH\n");
+            CreateThread(NULL, 0, InitThread, NULL, 0, NULL);
 
+            break;
+        // case DLL_THREAD_ATTACH:
+            // 通常不需要处理
+            // break;
+        // case DLL_THREAD_DETACH:
+            // 通常不需要处理
+            // break;
+        case DLL_PROCESS_DETACH:
             // 释放真实 DLL 的句柄
             if (hRealVersionDll) {
                 FreeLibrary(hRealVersionDll);
