@@ -164,20 +164,19 @@ void TriggerUpdateCheck() {
     string websiteVer = getVersionNum(contents);
 
     if (websiteVer != "") {
-        MessageBoxA(NULL, websiteVer.c_str(), "", NULL);
-
         vector<int> localVersion = getFileVersion(L"D:\\Program Files (x86)\\WinSCP\\WinSCP.exe"); // filesystem::current_path()
         vector<int> onlineVersion = splitVersion(websiteVer);
 
         int result = compareVersion(localVersion, onlineVersion);
 
         if (result < 0) {
-            // 文本替换版本号 {VERSION}
+            string downloadPage = WINSCP_PORTABLE_DOWNLOAD_PAGE;
+            downloadPage.replace(17, 9, websiteVer); // fixed
+
+            OutputDebugStringA(downloadPage.c_str());
 
             getUrlContents(WINSCP_UPDATE_PAGE_DOMAIN, WINSCP_PORTABLE_DOWNLOAD_PAGE);
         }
-
-        return; // 未获取到数据直接返回
     }
 }
 
