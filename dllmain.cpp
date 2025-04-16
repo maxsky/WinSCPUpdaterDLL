@@ -7,6 +7,7 @@ using namespace std;
 
 const string WINSCP_UPDATE_PAGE_DOMAIN = "https://winscp.net";
 const string WINSCP_UPDATE_PAGE_PATH = "/eng/downloads.php";
+const string WINSCP_PORTABLE_DOWNLOAD_PAGE = "/download/WinSCP-{VERSION}-Portable.zip/download";
 const string WINSCP_EXE_FILENAME = "WinSCP.exe";
 
 HMODULE hRealVersionDll = NULL;
@@ -74,7 +75,7 @@ BOOL LoadRealVersionDll() {
     return TRUE;
 }
 
-string file_get_contents(string domain, string path) {
+string getUrlContents(string domain, string path) {
     httplib::Client cli(domain);
 
     auto res = cli.Get(path);
@@ -100,7 +101,7 @@ string getVersionNum(const string html) {
     return "";
 }
 
-vector<int> GetFileVersion(const wstring filePath) {
+vector<int> getFileVersion(const wstring filePath) {
     DWORD dwHandle = 0;
     DWORD dwSize = GetFileVersionInfoSize(filePath.c_str(), &dwHandle);
 
@@ -159,21 +160,21 @@ int compareVersion(const vector<int> v1, const vector<int> v2) {
 }
 
 void TriggerUpdateCheck() {
-    string contents = file_get_contents(WINSCP_UPDATE_PAGE_DOMAIN, WINSCP_UPDATE_PAGE_PATH);
-
+    string contents = getUrlContents(WINSCP_UPDATE_PAGE_DOMAIN, WINSCP_UPDATE_PAGE_PATH);
     string websiteVer = getVersionNum(contents);
 
     if (websiteVer != "") {
         MessageBoxA(NULL, websiteVer.c_str(), "", NULL);
 
-        vector<int> localVersion = GetFileVersion(L"D:\\Program Files (x86)\\WinSCP\\WinSCP.exe"); // filesystem::current_path()
-
+        vector<int> localVersion = getFileVersion(L"D:\\Program Files (x86)\\WinSCP\\WinSCP.exe"); // filesystem::current_path()
         vector<int> onlineVersion = splitVersion(websiteVer);
 
         int result = compareVersion(localVersion, onlineVersion);
 
         if (result < 0) {
+            // 文本替换版本号 {VERSION}
 
+            getUrlContents(WINSCP_UPDATE_PAGE_DOMAIN, WINSCP_PORTABLE_DOWNLOAD_PAGE);
         }
 
         return; // 未获取到数据直接返回
