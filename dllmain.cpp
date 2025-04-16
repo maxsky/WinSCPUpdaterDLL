@@ -7,6 +7,7 @@ using namespace std;
 
 const string WINSCP_UPDATE_PAGE_DOMAIN = "https://winscp.net";
 const string WINSCP_UPDATE_PAGE_PATH = "/eng/downloads.php";
+const string WINSCP_EXE_FILENAME = "WinSCP.exe";
 
 HMODULE hRealVersionDll = NULL;
 
@@ -32,9 +33,9 @@ typedef BOOL(WINAPI* GetFileVersionInfoW_Type)(LPCWSTR lptstrFilename, DWORD dwH
 typedef DWORD(WINAPI* GetFileVersionInfoSizeW_Type)(LPCWSTR lptstrFilename, LPDWORD lpdwHandle);
 
 // --- 存储真实函数地址的指针 ---
-GetFileVersionInfoSizeW_Type Real_GetFileVersionInfoSizeW = NULL;
-GetFileVersionInfoW_Type Real_GetFileVersionInfoW = NULL;
 VerQueryValueW_Type Real_VerQueryValueW = NULL;
+GetFileVersionInfoW_Type Real_GetFileVersionInfoW = NULL;
+GetFileVersionInfoSizeW_Type Real_GetFileVersionInfoSizeW = NULL;
 
 BOOL LoadRealVersionDll() {
     CHAR realDllPath[MAX_PATH];
@@ -99,46 +100,83 @@ string getVersionNum(const string html) {
     return "";
 }
 
-void GetFileVersion(const wstring& filePath) {
-    DWORD dwHandle;
+vector<int> GetFileVersion(const wstring filePath) {
+    DWORD dwHandle = 0;
     DWORD dwSize = GetFileVersionInfoSize(filePath.c_str(), &dwHandle);
 
     if (dwSize == 0) {
-        std::wcout << L"Failed to get version info size for " << filePath << std::endl;
-        return;
+        return { 0 };
     }
 
     BYTE* pVersionInfo = new BYTE[dwSize];
+    vector<int> versions = { 0 };
 
-    if (!GetFileVersionInfo(filePath.c_str(), dwHandle, dwSize, pVersionInfo)) {
-        std::wcout << L"Failed to get version info for " << filePath << std::endl;
-        delete[] pVersionInfo;
-        return;
-    }
+    if (GetFileVersionInfo(filePath.c_str(), 0, dwSize, pVersionInfo)) {
+        VS_FIXEDFILEINFO* pFileInfo = nullptr;
+        UINT uLen = 0;
 
-    VS_FIXEDFILEINFO* pFileInfo;
-    UINT uLen;
-
-    if (VerQueryValue(pVersionInfo, L"\\", (LPVOID*)&pFileInfo, &uLen)) {
-        std::wcout << L"File version: "
-            << (pFileInfo->dwFileVersionMS >> 16) << L"."
-            << (pFileInfo->dwFileVersionMS & 0xFFFF) << L"."
-            << (pFileInfo->dwFileVersionLS >> 16) << L"."
-            << (pFileInfo->dwFileVersionLS & 0xFFFF) << std::endl;
-    } else {
-        std::wcout << L"Failed to query version information." << std::endl;
+        if (VerQueryValue(pVersionInfo, L"\\", (LPVOID*)&pFileInfo, &uLen)) {
+            versions = {
+                (int)HIWORD(pFileInfo->dwFileVersionMS),
+                (int)LOWORD(pFileInfo->dwFileVersionMS),
+                (int)HIWORD(pFileInfo->dwFileVersionLS),
+                (int)LOWORD(pFileInfo->dwFileVersionLS)
+            };
+        }
     }
 
     delete[] pVersionInfo;
+
+    return versions;
+}
+
+vector<int> splitVersion(const string version) {
+    vector<int> parts;
+    stringstream ss(version);
+    string part;
+
+    while (getline(ss, part, '.')) {
+        parts.push_back(stoi(part));
+    }
+
+    return parts;
+}
+
+int compareVersion(const vector<int> v1, const vector<int> v2) {
+    size_t len = max(v1.size(), v2.size());
+
+    vector<int> ver1 = v1, ver2 = v2;
+
+    ver1.resize(len, 0);
+    ver2.resize(len, 0);
+
+    for (size_t i = 0; i < len; ++i) {
+        if (ver1[i] < ver2[i]) return -1;
+        if (ver1[i] > ver2[i]) return 1;
+    }
+
+    return 0;
 }
 
 void TriggerUpdateCheck() {
     string contents = file_get_contents(WINSCP_UPDATE_PAGE_DOMAIN, WINSCP_UPDATE_PAGE_PATH);
 
-    string ver = getVersionNum(contents);
+    string websiteVer = getVersionNum(contents);
 
-    if (ver != "") {
-        MessageBoxA(NULL, ver.c_str(), "", NULL);
+    if (websiteVer != "") {
+        MessageBoxA(NULL, websiteVer.c_str(), "", NULL);
+
+        vector<int> localVersion = GetFileVersion(L"D:\\Program Files (x86)\\WinSCP\\WinSCP.exe"); // filesystem::current_path()
+
+        vector<int> onlineVersion = splitVersion(websiteVer);
+
+        int result = compareVersion(localVersion, onlineVersion);
+
+        if (result < 0) {
+
+        }
+
+        return; // 未获取到数据直接返回
     }
 }
 
